@@ -1,698 +1,226 @@
 [
   {
     "ruleId": "",
-    "ruleTitle": "Store Event Handlers in Refs",
+    "ruleTitle": "Connection Lifecycle Management",
     "type": "bad",
-    "code": "function useWindowEvent(event: string, handler: () => void) {\n  useEffect(() => {\n    window.addEventListener(event, handler)\n    return () => window.removeEventListener(event, handler)\n  }, [event, handler])\n}",
-    "language": "tsx",
-    "description": "re-subscribes on every render"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Store Event Handlers in Refs",
-    "type": "good",
-    "code": "import { useEffectEvent } from 'react'\n\nfunction useWindowEvent(event: string, handler: () => void) {\n  const onEvent = useEffectEvent(handler)\n\n  useEffect(() => {\n    window.addEventListener(event, onEvent)\n    return () => window.removeEventListener(event, onEvent)\n  }, [event])\n}",
-    "language": "tsx",
-    "description": "stable subscription"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "useLatest for Stable Callback Refs",
-    "type": "bad",
-    "code": "function SearchInput({ onSearch }: { onSearch: (q: string) => void }) {\n  const [query, setQuery] = useState('')\n\n  useEffect(() => {\n    const timeout = setTimeout(() => onSearch(query), 300)\n    return () => clearTimeout(timeout)\n  }, [query, onSearch])\n}",
-    "language": "tsx",
-    "description": "effect re-runs on every callback change"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "useLatest for Stable Callback Refs",
-    "type": "good",
-    "code": "function SearchInput({ onSearch }: { onSearch: (q: string) => void }) {\n  const [query, setQuery] = useState('')\n  const onSearchRef = useLatest(onSearch)\n\n  useEffect(() => {\n    const timeout = setTimeout(() => onSearchRef.current(query), 300)\n    return () => clearTimeout(timeout)\n  }, [query])\n}",
-    "language": "tsx",
-    "description": "stable effect, fresh callback"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Prevent Waterfall Chains in API Routes",
-    "type": "bad",
-    "code": "export async function GET(request: Request) {\n  const session = await auth()\n  const config = await fetchConfig()\n  const data = await fetchData(session.user.id)\n  return Response.json({ data, config })\n}",
+    "code": "// No connection state handling - using old API\nimport { DbConnection } from './generated';\n\n// Just connect and hope for the best\nconst conn = DbConnection.builder()\n  .withUri('ws://localhost:3000')\n  .withModuleName('my-module')\n  .build();\n\n// No handling of disconnects or errors\n// User has no idea if they're connected or not",
     "language": "typescript",
-    "description": "config waits for auth, data waits for both"
+    "description": "ignoring connection events"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Prevent Waterfall Chains in API Routes",
+    "ruleTitle": "Connection Lifecycle Management",
     "type": "good",
-    "code": "export async function GET(request: Request) {\n  const sessionPromise = auth()\n  const configPromise = fetchConfig()\n  const session = await sessionPromise\n  const [config, data] = await Promise.all([\n    configPromise,\n    fetchData(session.user.id)\n  ])\n  return Response.json({ data, config })\n}",
+    "code": "// React hook for connection state\nimport { useState, useEffect, useRef } from 'react';\nimport { GameClient, ConnectionState } from './GameClient';\n\nfunction useConnectionState() {\n  const [state, setState] = useState<ConnectionState>('disconnected');\n  const clientRef = useRef<GameClient | null>(null);\n\n  useEffect(() => {\n    clientRef.current = new GameClient(setState);\n    clientRef.current.connect();\n\n    return () => {\n      clientRef.current?.disconnect();\n    };\n  }, []);\n\n  return { state, client: clientRef.current };\n}\n\n// Connection status indicator component\nfunction ConnectionStatus() {\n  const { state } = useConnectionState();\n\n  const statusMap = {\n    disconnected: { color: 'red', text: 'Offline' },\n    connecting: { color: 'yellow', text: 'Connecting...' },\n    connected: { color: 'green', text: 'Connected' },\n    reconnecting: { color: 'orange', text: 'Reconnecting...' }\n  };\n\n  const status = statusMap[state];\n\n  return (\n    <div style={{ color: status.color }}>\n      {status.text}\n    </div>\n  );\n}\n\nexport { useConnectionState, ConnectionStatus };",
     "language": "typescript",
-    "description": "auth and config start immediately"
+    "description": "comprehensive connection lifecycle"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Defer Await Until Needed",
+    "ruleTitle": "Error Handling in Modules",
     "type": "bad",
-    "code": "async function handleRequest(userId: string, skipProcessing: boolean) {\n  const userData = await fetchUserData(userId)\n  \n  if (skipProcessing) {\n    // Returns immediately but still waited for userData\n    return { skipped: true }\n  }\n  \n  // Only this branch uses userData\n  return processUserData(userData)\n}",
+    "code": "import { spacetimedb, table, t, ReducerContext } from 'spacetimedb';\n\nspacetimedb.reducer(\n  'purchase_item',\n  { itemId: t.string(), quantity: t.u32() },\n  (ctx: ReducerContext, { itemId, quantity }) => {\n    const user = ctx.db.user.identity.find(ctx.sender);\n    const item = ctx.db.item.id.find(itemId);\n\n    // Silent failure - no error if user or item doesn't exist\n    if (!user || !item) {\n      return; // Client has no idea what went wrong\n    }\n\n    // No validation - can go negative\n    ctx.db.user.identity.update({ ...user, balance: user.balance - item.price * BigInt(quantity) });\n\n    // Silent failure if insufficient stock\n    if (item.stock < quantity) {\n      return; // Purchase \"succeeded\" but nothing happened\n    }\n\n    ctx.db.item.id.update({ ...item, stock: item.stock - quantity });\n  }\n);",
     "language": "typescript",
-    "description": "blocks both branches"
+    "description": "poor error handling"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Defer Await Until Needed",
+    "ruleTitle": "Error Handling in Modules",
     "type": "good",
-    "code": "async function handleRequest(userId: string, skipProcessing: boolean) {\n  if (skipProcessing) {\n    // Returns immediately without waiting\n    return { skipped: true }\n  }\n  \n  // Fetch only when needed\n  const userData = await fetchUserData(userId)\n  return processUserData(userData)\n}",
+    "code": "// Client-side error handling\nimport { DbConnection } from './generated';\n\nasync function handlePurchase(conn: DbConnection, itemId: string, quantity: number) {\n  try {\n    await conn.reducers.purchaseItem(itemId, quantity);\n    showToast('Purchase successful!', 'success');\n  } catch (error) {\n    if (error instanceof Error) {\n      // Handle specific error types\n      if (error.message.includes('Insufficient balance')) {\n        showToast('Not enough coins! Earn more or buy coins.', 'warning');\n        showBuyCoinsModal();\n      } else if (error.message.includes('Insufficient stock')) {\n        showToast('Item out of stock. Try again later.', 'error');\n      } else if (error.message.includes('not found')) {\n        showToast('Item no longer available.', 'error');\n        refreshInventory();\n      } else {\n        // Generic error\n        showToast(`Purchase failed: ${error.message}`, 'error');\n      }\n    } else {\n      showToast('An unexpected error occurred.', 'error');\n    }\n\n    console.error('Purchase error:', error);\n  }\n}",
     "language": "typescript",
-    "description": "only blocks when needed"
+    "description": "comprehensive error handling"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Dependency-Based Parallelization",
+    "ruleTitle": "Lifecycle Hooks",
     "type": "bad",
-    "code": "const [user, config] = await Promise.all([\n  fetchUser(),\n  fetchConfig()\n])\nconst profile = await fetchProfile(user.id)",
+    "code": "// No initialization or connection tracking\nimport { spacetimedb, table, t, ReducerContext } from 'spacetimedb';\n\nconst GameState = table(\n  { name: 'game_state', public: true },\n  {\n    id: t.string().primaryKey(),\n    status: t.string(),\n  }\n);\n\nconst Player = table(\n  { name: 'player', public: true },\n  {\n    identityId: t.string().primaryKey(),\n    name: t.string(),\n    isOnline: t.bool(), // Never updated!\n  }\n);\n\nspacetimedb.reducer('join_game', { name: t.string() }, (ctx: ReducerContext, { name }) => {\n  // Player online status never gets set properly\n  ctx.db.player.insert({\n    identityId: ctx.sender.toHexString(),\n    name,\n    isOnline: true\n  });\n});",
     "language": "typescript",
-    "description": "profile waits for config unnecessarily"
+    "description": "missing lifecycle hooks"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Dependency-Based Parallelization",
+    "ruleTitle": "Lifecycle Hooks",
     "type": "good",
-    "code": "import { all } from 'better-all'\n\nconst { user, config, profile } = await all({\n  async user() { return fetchUser() },\n  async config() { return fetchConfig() },\n  async profile() {\n    return fetchProfile((await this.$.user).id)\n  }\n})",
+    "code": "import { spacetimedb, table, t, ReducerContext } from 'spacetimedb';\n\nconst GameState = table(\n  { name: 'game_state', public: true },\n  {\n    id: t.string().primaryKey(),\n    status: t.string(), // 'waiting' | 'active' | 'finished'\n    createdAt: t.u64(),\n  }\n);\n\nconst Player = table(\n  { name: 'player', public: true },\n  {\n    identityId: t.identity().primaryKey(),\n    name: t.string(),\n    isOnline: t.bool(),\n    lastSeen: t.u64(),\n  }\n);\n\n// Initialize game state when module is first published\nspacetimedb.init((ctx: ReducerContext) => {\n  // Create initial game state if it doesn't exist\n  if (!ctx.db.game_state.id.find('main')) {\n    ctx.db.game_state.insert({\n      id: 'main',\n      status: 'waiting',\n      createdAt: ctx.timestamp\n    });\n  }\n});\n\n// Track when a client connects\nspacetimedb.clientConnected((ctx: ReducerContext) => {\n  const identityId = ctx.sender;\n  const player = ctx.db.player.identityId.find(identityId);\n\n  if (player) {\n    // Mark existing player as online\n    ctx.db.player.identityId.update({\n      ...player,\n      isOnline: true,\n      lastSeen: ctx.timestamp\n    });\n  }\n});\n\n// Track when a client disconnects\nspacetimedb.clientDisconnected((ctx: ReducerContext) => {\n  const identityId = ctx.sender;\n  const player = ctx.db.player.identityId.find(identityId);\n\n  if (player) {\n    ctx.db.player.identityId.update({\n      ...player,\n      isOnline: false,\n      lastSeen: ctx.timestamp\n    });\n  }\n});\n\nspacetimedb.reducer('register_player', { name: t.string() }, (ctx: ReducerContext, { name }) => {\n  const identityId = ctx.sender;\n\n  if (ctx.db.player.identityId.find(identityId)) {\n    throw new Error('Player already registered');\n  }\n\n  ctx.db.player.insert({\n    identityId,\n    name,\n    isOnline: true,\n    lastSeen: ctx.timestamp\n  });\n});",
     "language": "typescript",
-    "description": "config and profile run in parallel"
+    "description": "proper lifecycle management"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Promise.all() for Independent Operations",
+    "ruleTitle": "Single Responsibility Modules",
     "type": "bad",
-    "code": "const user = await fetchUser()\nconst posts = await fetchPosts()\nconst comments = await fetchComments()",
+    "code": "// module.ts - handles users, products, AND orders\nimport { spacetimedb, table, t, ReducerContext, Table } from 'spacetimedb';\n\nconst User = table(\n  { name: 'user', public: true },\n  {\n    id: t.string().primaryKey(),\n    name: t.string(),\n  }\n);\n\nconst Product = table(\n  { name: 'product', public: true },\n  {\n    id: t.string().primaryKey(),\n    name: t.string(),\n    price: t.u64(),\n  }\n);\n\nconst Order = table(\n  { name: 'order', public: true },\n  {\n    id: t.string().primaryKey(),\n    userId: t.string(),\n    productId: t.string(),\n  }\n);\n\n// Too many unrelated reducers in one module\nspacetimedb.reducer('create_user', { name: t.string() }, (ctx: ReducerContext, { name }) => {\n  /* ... */\n});\n\nspacetimedb.reducer('update_product', { id: t.string(), price: t.u64() }, (ctx: ReducerContext, { id, price }) => {\n  /* ... */\n});\n\nspacetimedb.reducer('place_order', { userId: t.string(), productId: t.string() }, (ctx: ReducerContext, { userId, productId }) => {\n  /* ... */\n});",
     "language": "typescript",
-    "description": "sequential execution, 3 round trips"
+    "description": "multiple concerns in one module"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Promise.all() for Independent Operations",
+    "ruleTitle": "Single Responsibility Modules",
     "type": "good",
-    "code": "const [user, posts, comments] = await Promise.all([\n  fetchUser(),\n  fetchPosts(),\n  fetchComments()\n])",
+    "code": "// orders/module.ts\nimport { spacetimedb, table, t, ReducerContext } from 'spacetimedb';\n\nexport const Order = table(\n  { name: 'order', public: true },\n  {\n    id: t.string().primaryKey(),\n    userId: t.string().index(),\n    productId: t.string(),\n    quantity: t.u32(),\n    createdAt: t.u64(),\n  }\n);\n\nfunction generateId(): string {\n  return crypto.randomUUID();\n}\n\nspacetimedb.reducer('place_order', { productId: t.string(), quantity: t.u32() }, (ctx: ReducerContext, { productId, quantity }) => {\n  const userId = ctx.sender.toHexString();\n  ctx.db.order.insert({\n    id: generateId(),\n    userId,\n    productId,\n    quantity,\n    createdAt: ctx.timestamp\n  });\n});",
     "language": "typescript",
-    "description": "parallel execution, 1 round trip"
+    "description": "separate modules per domain"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Strategic Suspense Boundaries",
+    "ruleTitle": "Reducer Hooks with Error Handling",
     "type": "bad",
-    "code": "async function Page() {\n  const data = await fetchData() // Blocks entire page\n  \n  return (\n    <div>\n      <div>Sidebar</div>\n      <div>Header</div>\n      <div>\n        <DataDisplay data={data} />\n      </div>\n      <div>Footer</div>\n    </div>\n  )\n}",
-    "language": "tsx",
-    "description": "wrapper blocked by data fetching"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Strategic Suspense Boundaries",
-    "type": "good",
-    "code": "function Page() {\n  return (\n    <div>\n      <div>Sidebar</div>\n      <div>Header</div>\n      <div>\n        <Suspense fallback={<Skeleton />}>\n          <DataDisplay />\n        </Suspense>\n      </div>\n      <div>Footer</div>\n    </div>\n  )\n}\n\nasync function DataDisplay() {\n  const data = await fetchData() // Only blocks this component\n  return <div>{data.content}</div>\n}",
-    "language": "tsx",
-    "description": "wrapper shows immediately, data streams in"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Avoid Barrel File Imports",
-    "type": "bad",
-    "code": "import { Check, X, Menu } from 'lucide-react'\n// Loads 1,583 modules, takes ~2.8s extra in dev\n// Runtime cost: 200-800ms on every cold start\n\nimport { Button, TextField } from '@mui/material'\n// Loads 2,225 modules, takes ~4.2s extra in dev",
-    "language": "tsx",
-    "description": "imports entire library"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Avoid Barrel File Imports",
-    "type": "good",
-    "code": "import Check from 'lucide-react/dist/esm/icons/check'\nimport X from 'lucide-react/dist/esm/icons/x'\nimport Menu from 'lucide-react/dist/esm/icons/menu'\n// Loads only 3 modules (~2KB vs ~1MB)\n\nimport Button from '@mui/material/Button'\nimport TextField from '@mui/material/TextField'\n// Loads only what you use",
-    "language": "tsx",
-    "description": "imports only what you need"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Defer Non-Critical Third-Party Libraries",
-    "type": "bad",
-    "code": "import { Analytics } from '@vercel/analytics/react'\n\nexport default function RootLayout({ children }) {\n  return (\n    <html>\n      <body>\n        {children}\n        <Analytics />\n      </body>\n    </html>\n  )\n}",
-    "language": "tsx",
-    "description": "blocks initial bundle"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Defer Non-Critical Third-Party Libraries",
-    "type": "good",
-    "code": "import dynamic from 'next/dynamic'\n\nconst Analytics = dynamic(\n  () => import('@vercel/analytics/react').then(m => m.Analytics),\n  { ssr: false }\n)\n\nexport default function RootLayout({ children }) {\n  return (\n    <html>\n      <body>\n        {children}\n        <Analytics />\n      </body>\n    </html>\n  )\n}",
-    "language": "tsx",
-    "description": "loads after hydration"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Dynamic Imports for Heavy Components",
-    "type": "bad",
-    "code": "import { MonacoEditor } from './monaco-editor'\n\nfunction CodePanel({ code }: { code: string }) {\n  return <MonacoEditor value={code} />\n}",
-    "language": "tsx",
-    "description": "Monaco bundles with main chunk ~300KB"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Dynamic Imports for Heavy Components",
-    "type": "good",
-    "code": "import dynamic from 'next/dynamic'\n\nconst MonacoEditor = dynamic(\n  () => import('./monaco-editor').then(m => m.MonacoEditor),\n  { ssr: false }\n)\n\nfunction CodePanel({ code }: { code: string }) {\n  return <MonacoEditor value={code} />\n}",
-    "language": "tsx",
-    "description": "Monaco loads on demand"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Deduplicate Global Event Listeners",
-    "type": "bad",
-    "code": "function useKeyboardShortcut(key: string, callback: () => void) {\n  useEffect(() => {\n    const handler = (e: KeyboardEvent) => {\n      if (e.metaKey && e.key === key) {\n        callback()\n      }\n    }\n    window.addEventListener('keydown', handler)\n    return () => window.removeEventListener('keydown', handler)\n  }, [key, callback])\n}",
-    "language": "tsx",
-    "description": "N instances = N listeners"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Deduplicate Global Event Listeners",
-    "type": "good",
-    "code": "import useSWRSubscription from 'swr/subscription'\n\n// Module-level Map to track callbacks per key\nconst keyCallbacks = new Map<string, Set<() => void>>()\n\nfunction useKeyboardShortcut(key: string, callback: () => void) {\n  // Register this callback in the Map\n  useEffect(() => {\n    if (!keyCallbacks.has(key)) {\n      keyCallbacks.set(key, new Set())\n    }\n    keyCallbacks.get(key)!.add(callback)\n\n    return () => {\n      const set = keyCallbacks.get(key)\n      if (set) {\n        set.delete(callback)\n        if (set.size === 0) {\n          keyCallbacks.delete(key)\n        }\n      }\n    }\n  }, [key, callback])\n\n  useSWRSubscription('global-keydown', () => {\n    const handler = (e: KeyboardEvent) => {\n      if (e.metaKey && keyCallbacks.has(e.key)) {\n        keyCallbacks.get(e.key)!.forEach(cb => cb())\n      }\n    }\n    window.addEventListener('keydown', handler)\n    return () => window.removeEventListener('keydown', handler)\n  })\n}\n\nfunction Profile() {\n  // Multiple shortcuts will share the same listener\n  useKeyboardShortcut('p', () => { /* ... */ }) \n  useKeyboardShortcut('k', () => { /* ... */ })\n  // ...\n}",
-    "language": "tsx",
-    "description": "N instances = 1 listener"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Version and Minimize localStorage Data",
-    "type": "bad",
-    "code": "// No version, stores everything, no error handling\nlocalStorage.setItem('userConfig', JSON.stringify(fullUserObject))\nconst data = localStorage.getItem('userConfig')",
+    "code": "import { useState } from 'react';\nimport { DbConnection } from './generated';\n\nfunction SendMessageButton({ channelId, conn }: { channelId: string; conn: DbConnection }) {\n  const [message, setMessage] = useState('');\n\n  const handleSend = () => {\n    // Fire and forget - no feedback to user\n    conn.reducers.sendMessage(channelId, message);\n    setMessage('');\n  };\n\n  return (\n    <div>\n      <input value={message} onChange={e => setMessage(e.target.value)} />\n      <button onClick={handleSend}>Send</button>\n    </div>\n  );\n}",
     "language": "typescript",
-    "description": "Incorrect example for Version and Minimize localStorage Data"
+    "description": "no error handling or loading states"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Version and Minimize localStorage Data",
+    "ruleTitle": "Reducer Hooks with Error Handling",
     "type": "good",
-    "code": "const VERSION = 'v2'\n\nfunction saveConfig(config: { theme: string; language: string }) {\n  try {\n    localStorage.setItem(`userConfig:${VERSION}`, JSON.stringify(config))\n  } catch {\n    // Throws in incognito/private browsing, quota exceeded, or disabled\n  }\n}\n\nfunction loadConfig() {\n  try {\n    const data = localStorage.getItem(`userConfig:${VERSION}`)\n    return data ? JSON.parse(data) : null\n  } catch {\n    return null\n  }\n}\n\n// Migration from v1 to v2\nfunction migrate() {\n  try {\n    const v1 = localStorage.getItem('userConfig:v1')\n    if (v1) {\n      const old = JSON.parse(v1)\n      saveConfig({ theme: old.darkMode ? 'dark' : 'light', language: old.lang })\n      localStorage.removeItem('userConfig:v1')\n    }\n  } catch {}\n}",
+    "code": "import { useState, useCallback } from 'react';\nimport { DbConnection } from './generated';\n\n// Custom hook for reducer with loading/error states\nfunction useReducerWithState<T extends any[]>(\n  conn: DbConnection | null,\n  reducerName: keyof DbConnection['reducers']\n): [(...args: T) => Promise<void>, { loading: boolean; error: Error | null }] {\n  const [loading, setLoading] = useState(false);\n  const [error, setError] = useState<Error | null>(null);\n\n  const call = useCallback(async (...args: T) => {\n    if (!conn) {\n      setError(new Error('Not connected'));\n      return;\n    }\n\n    setLoading(true);\n    setError(null);\n\n    try {\n      await (conn.reducers[reducerName] as (...args: T) => Promise<void>)(...args);\n    } catch (err) {\n      const error = err instanceof Error ? err : new Error(String(err));\n      setError(error);\n      throw error;\n    } finally {\n      setLoading(false);\n    }\n  }, [conn, reducerName]);\n\n  return [call, { loading, error }];\n}\n\n// Message sending with proper feedback\nfunction MessageInput({ channelId, conn }: { channelId: string; conn: DbConnection }) {\n  const [message, setMessage] = useState('');\n  const [sendMessage, { loading, error }] = useReducerWithState<[string, string]>(\n    conn,\n    'sendMessage'\n  );\n\n  const handleSubmit = async (e: React.FormEvent) => {\n    e.preventDefault();\n\n    if (!message.trim()) return;\n\n    try {\n      await sendMessage(channelId, message.trim());\n      setMessage(''); // Only clear on success\n    } catch (err) {\n      // Error is already set in hook state\n      console.error('Failed to send message:', err);\n    }\n  };\n\n  return (\n    <form onSubmit={handleSubmit}>\n      <input\n        value={message}\n        onChange={e => setMessage(e.target.value)}\n        disabled={loading}\n        placeholder=\"Type a message...\"\n      />\n      <button type=\"submit\" disabled={loading || !message.trim()}>\n        {loading ? 'Sending...' : 'Send'}\n      </button>\n      {error && (\n        <div style={{ color: 'red' }}>\n          Failed to send: {error.message}\n        </div>\n      )}\n    </form>\n  );\n}\n\n// Optimistic updates for instant feedback\nfunction LikeButton({\n  postId,\n  currentLikes,\n  conn\n}: {\n  postId: string;\n  currentLikes: number;\n  conn: DbConnection;\n}) {\n  const [optimisticLikes, setOptimisticLikes] = useState<number | null>(null);\n  const [likePost, { loading, error }] = useReducerWithState<[string]>(\n    conn,\n    'likePost'\n  );\n\n  const handleLike = async () => {\n    // Optimistic update - show new count immediately\n    setOptimisticLikes(currentLikes + 1);\n\n    try {\n      await likePost(postId);\n      // Success - optimistic update will be replaced by real data\n    } catch (err) {\n      // Revert optimistic update on failure\n      setOptimisticLikes(null);\n    }\n  };\n\n  const displayLikes = optimisticLikes ?? currentLikes;\n\n  return (\n    <button onClick={handleLike} disabled={loading}>\n      ❤️ {displayLikes}\n      {error && ' (failed)'}\n    </button>\n  );\n}\n\n// Complex form with multiple reducers\nfunction CreateGameForm({ conn }: { conn: DbConnection }) {\n  const [gameName, setGameName] = useState('');\n  const [maxPlayers, setMaxPlayers] = useState(4);\n\n  const [createGame, createState] = useReducerWithState<[string, number]>(\n    conn,\n    'createGame'\n  );\n  const [joinGame, joinState] = useReducerWithState<[string]>(\n    conn,\n    'joinGame'\n  );\n\n  const handleCreate = async (e: React.FormEvent) => {\n    e.preventDefault();\n\n    try {\n      // Create game and join it\n      await createGame(gameName, maxPlayers);\n      // After game is created, we'd typically get the game ID from state\n      // and then join it\n    } catch (err) {\n      // Error states are handled by individual hooks\n    }\n  };\n\n  const loading = createState.loading || joinState.loading;\n  const error = createState.error || joinState.error;\n\n  return (\n    <form onSubmit={handleCreate}>\n      <input\n        value={gameName}\n        onChange={e => setGameName(e.target.value)}\n        placeholder=\"Game name\"\n        disabled={loading}\n      />\n      <select\n        value={maxPlayers}\n        onChange={e => setMaxPlayers(Number(e.target.value))}\n        disabled={loading}\n      >\n        {[2, 4, 6, 8].map(n => (\n          <option key={n} value={n}>{n} players</option>\n        ))}\n      </select>\n      <button type=\"submit\" disabled={loading || !gameName.trim()}>\n        {loading ? 'Creating...' : 'Create Game'}\n      </button>\n      {error && (\n        <div style={{ color: 'red' }}>\n          {error.message}\n        </div>\n      )}\n    </form>\n  );\n}",
     "language": "typescript",
-    "description": "Correct example for Version and Minimize localStorage Data"
+    "description": "proper hooks with error handling"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Use Passive Event Listeners for Scrolling Performance",
+    "ruleTitle": "React Table Hooks",
     "type": "bad",
-    "code": "useEffect(() => {\n  const handleTouch = (e: TouchEvent) => console.log(e.touches[0].clientX)\n  const handleWheel = (e: WheelEvent) => console.log(e.deltaY)\n  \n  document.addEventListener('touchstart', handleTouch)\n  document.addEventListener('wheel', handleWheel)\n  \n  return () => {\n    document.removeEventListener('touchstart', handleTouch)\n    document.removeEventListener('wheel', handleWheel)\n  }\n}, [])",
+    "code": "import { useState, useEffect } from 'react';\nimport { DbConnection, Player } from './generated';\n\n// Manually managing state - error-prone and verbose\nfunction PlayerList({ conn }: { conn: DbConnection }) {\n  const [players, setPlayers] = useState<Player[]>([]);\n\n  useEffect(() => {\n    // Manual subscription setup\n    const sub = conn.subscription(['SELECT * FROM player WHERE isOnline = true']);\n\n    // Manual event handling\n    const handleInsert = (player: Player) => {\n      setPlayers(prev => [...prev, player]);\n    };\n\n    const handleUpdate = (oldPlayer: Player, newPlayer: Player) => {\n      setPlayers(prev => prev.map(p =>\n        p.identity.toHexString() === newPlayer.identity.toHexString() ? newPlayer : p\n      ));\n    };\n\n    const handleDelete = (player: Player) => {\n      setPlayers(prev => prev.filter(p =>\n        p.identity.toHexString() !== player.identity.toHexString()\n      ));\n    };\n\n    conn.db.player.onInsert(handleInsert);\n    conn.db.player.onUpdate(handleUpdate);\n    conn.db.player.onDelete(handleDelete);\n\n    return () => {\n      sub?.unsubscribe();\n      conn.db.player.offInsert(handleInsert);\n      conn.db.player.offUpdate(handleUpdate);\n      conn.db.player.offDelete(handleDelete);\n    };\n  }, [conn]);\n\n  return (\n    <ul>\n      {players.map(player => (\n        <li key={player.identity.toHexString()}>{player.name}</li>\n      ))}\n    </ul>\n  );\n}",
     "language": "typescript",
-    "description": "Incorrect example for Use Passive Event Listeners for Scrolling Performance"
+    "description": "manual state management"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Use Passive Event Listeners for Scrolling Performance",
+    "ruleTitle": "React Table Hooks",
     "type": "good",
-    "code": "useEffect(() => {\n  const handleTouch = (e: TouchEvent) => console.log(e.touches[0].clientX)\n  const handleWheel = (e: WheelEvent) => console.log(e.deltaY)\n  \n  document.addEventListener('touchstart', handleTouch, { passive: true })\n  document.addEventListener('wheel', handleWheel, { passive: true })\n  \n  return () => {\n    document.removeEventListener('touchstart', handleTouch)\n    document.removeEventListener('wheel', handleWheel)\n  }\n}, [])",
+    "code": "import { useMemo } from 'react';\nimport { useTable, where, eq } from 'spacetimedb/react';\nimport { DbConnection, Player, Message } from './generated';\n\n// Simple table hook - all rows\nfunction PlayerList() {\n  // Automatically re-renders when player table changes\n  const { rows: players } = useTable<DbConnection, Player>('player');\n\n  return (\n    <ul>\n      {players.map(player => (\n        <li key={player.identity.toHexString()}>\n          {player.name} - {player.score} points\n        </li>\n      ))}\n    </ul>\n  );\n}\n\n// Filtered query hook using where clause\nfunction OnlinePlayerList() {\n  // Only re-renders when online players change\n  const { rows: onlinePlayers } = useTable<DbConnection, Player>(\n    'player',\n    where(eq('isOnline', true))\n  );\n\n  return (\n    <ul>\n      {onlinePlayers.map(player => (\n        <li key={player.identity.toHexString()}>\n          {player.name} - Online\n        </li>\n      ))}\n    </ul>\n  );\n}\n\n// Single row lookup\nfunction PlayerProfile({ playerId }: { playerId: string }) {\n  const { rows: players } = useTable<DbConnection, Player>('player');\n\n  // Find the specific player\n  const player = players.find(p => p.identity.toHexString() === playerId);\n\n  if (!player) {\n    return <div>Player not found</div>;\n  }\n\n  return (\n    <div>\n      <h2>{player.name}</h2>\n      <p>Score: {player.score}</p>\n      <p>Status: {player.isOnline ? 'Online' : 'Offline'}</p>\n    </div>\n  );\n}\n\n// Computed/derived data\nfunction GameStats() {\n  const { rows: players } = useTable<DbConnection, Player>('player');\n\n  // Derived calculations are memoized\n  const stats = useMemo(() => ({\n    totalPlayers: players.length,\n    onlinePlayers: players.filter(p => p.isOnline).length,\n    averageScore: players.length > 0\n      ? players.reduce((sum, p) => sum + Number(p.score), 0) / players.length\n      : 0,\n    topPlayer: players.reduce((top, p) =>\n      Number(p.score) > (top ? Number(top.score) : 0) ? p : top,\n      null as Player | null\n    )\n  }), [players]);\n\n  return (\n    <div>\n      <p>Total Players: {stats.totalPlayers}</p>\n      <p>Online: {stats.onlinePlayers}</p>\n      <p>Average Score: {stats.averageScore.toFixed(0)}</p>\n      {stats.topPlayer && (\n        <p>Top Player: {stats.topPlayer.name} ({stats.topPlayer.score.toString()})</p>\n      )}\n    </div>\n  );\n}\n\n// Multiple tables with relationships\nfunction MessageWithAuthor({ messageId }: { messageId: string }) {\n  const { rows: messages } = useTable<DbConnection, Message>('message');\n  const { rows: players } = useTable<DbConnection, Player>('player');\n\n  const message = messages.find(m => m.id === messageId);\n  const author = message\n    ? players.find(p => p.identity.toHexString() === message.authorId.toHexString())\n    : null;\n\n  if (!message || !author) {\n    return <div>Loading...</div>;\n  }\n\n  return (\n    <div>\n      <strong>{author.name}</strong>: {message.content}\n    </div>\n  );\n}",
     "language": "typescript",
-    "description": "Correct example for Use Passive Event Listeners for Scrolling Performance"
+    "description": "using React hooks"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Use SWR for Automatic Deduplication",
+    "ruleTitle": "Atomic Reducers",
     "type": "bad",
-    "code": "function UserList() {\n  const [users, setUsers] = useState([])\n  useEffect(() => {\n    fetch('/api/users')\n      .then(r => r.json())\n      .then(setUsers)\n  }, [])\n}",
-    "language": "tsx",
-    "description": "no deduplication, each instance fetches"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Use SWR for Automatic Deduplication",
-    "type": "good",
-    "code": "import useSWR from 'swr'\n\nfunction UserList() {\n  const { data: users } = useSWR('/api/users', fetcher)\n}",
-    "language": "tsx",
-    "description": "multiple instances share one request"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Batch DOM CSS Changes",
-    "type": "bad",
-    "code": "function updateElementStyles(element: HTMLElement) {\n  // Each line triggers a reflow\n  element.style.width = '100px'\n  element.style.height = '200px'\n  element.style.backgroundColor = 'blue'\n  element.style.border = '1px solid black'\n}",
+    "code": "import { spacetimedb, t, ReducerContext } from 'spacetimedb';\n\nspacetimedb.reducer(\n  'process_game_turn',\n  { playerId: t.string(), action: t.string() },\n  (ctx: ReducerContext, { playerId, action }) => {\n    // This reducer does too many things - if it fails partway through,\n    // it's hard to know what state we're in\n\n    // Step 1: Update player position\n    const player = ctx.db.player.id.find(playerId);\n    ctx.db.player.id.update({ ...player, position: calculateNewPosition(action) });\n\n    // Step 2: Check for collisions with all other players\n    const allPlayers = ctx.db.player.iter();\n    for (const other of allPlayers) {\n      if (checkCollision(player, other)) {\n        // Step 3: Apply damage\n        ctx.db.player.id.update({ ...other, health: other.health - 10 });\n        // Step 4: Create combat log\n        ctx.db.combat_log.insert({ /* ... */ });\n        // Step 5: Update leaderboard\n        ctx.db.leaderboard.id.update({ /* ... */ });\n        // Step 6: Award achievements\n        checkAndAwardAchievements(ctx, playerId);\n      }\n    }\n\n    // Step 7: Advance game state\n    advanceGameState(ctx);\n  }\n);",
     "language": "typescript",
-    "description": "multiple reflows"
+    "description": "non-atomic reducer doing too much"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Batch DOM CSS Changes",
+    "ruleTitle": "Atomic Reducers",
     "type": "good",
-    "code": "// CSS file\n.highlighted-box {\n  width: 100px;\n  height: 200px;\n  background-color: blue;\n  border: 1px solid black;\n}\n\n// JavaScript\nfunction updateElementStyles(element: HTMLElement) {\n  element.classList.add('highlighted-box')\n}",
+    "code": "import { spacetimedb, t, ReducerContext } from 'spacetimedb';\n\nfunction generateId(): string {\n  return crypto.randomUUID();\n}\n\n// Each reducer does ONE thing well\n\nspacetimedb.reducer(\n  'move_player',\n  { direction: t.string() },\n  (ctx: ReducerContext, { direction }) => {\n    const playerId = ctx.sender;\n    const player = ctx.db.player.identity.find(playerId);\n\n    if (!player) {\n      throw new Error('Player not found');\n    }\n\n    const newPosition = calculateNewPosition(player.position, direction);\n\n    if (!isValidPosition(newPosition)) {\n      throw new Error('Invalid move');\n    }\n\n    ctx.db.player.identity.update({\n      ...player,\n      position: newPosition,\n      lastMoveAt: ctx.timestamp\n    });\n  }\n);\n\nspacetimedb.reducer(\n  'attack_player',\n  { targetId: t.identity(), damage: t.u32() },\n  (ctx: ReducerContext, { targetId, damage }) => {\n    const attackerId = ctx.sender;\n    const target = ctx.db.player.identity.find(targetId);\n\n    if (!target) {\n      throw new Error('Target not found');\n    }\n\n    const newHealth = Math.max(0, target.health - damage);\n\n    ctx.db.player.identity.update({\n      ...target,\n      health: newHealth\n    });\n\n    ctx.db.combat_log.insert({\n      id: generateId(),\n      attackerId,\n      targetId,\n      damage,\n      timestamp: ctx.timestamp\n    });\n  }\n);\n\nspacetimedb.reducer(\n  'claim_achievement',\n  { achievementId: t.string() },\n  (ctx: ReducerContext, { achievementId }) => {\n    const playerId = ctx.sender;\n    const player = ctx.db.player.identity.find(playerId);\n\n    if (!player) {\n      throw new Error('Player not found');\n    }\n\n    // Verify achievement requirements\n    if (!checkAchievementRequirements(ctx, playerId, achievementId)) {\n      throw new Error('Achievement requirements not met');\n    }\n\n    // Check if already claimed\n    const existing = ctx.db.player_achievement.playerId.filter(playerId)\n      .find(a => a.achievementId === achievementId);\n\n    if (existing) {\n      throw new Error('Achievement already claimed');\n    }\n\n    ctx.db.player_achievement.insert({\n      playerId,\n      achievementId,\n      claimedAt: ctx.timestamp\n    });\n  }\n);",
     "language": "typescript",
-    "description": "add class - single reflow"
+    "description": "atomic, focused reducers"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Batch DOM CSS Changes",
-    "type": "good",
-    "code": "function updateElementStyles(element: HTMLElement) {\n  element.style.cssText = `\n    width: 100px;\n    height: 200px;\n    background-color: blue;\n    border: 1px solid black;\n  `\n}",
+    "ruleTitle": "Authorization Checks",
+    "type": "bad",
+    "code": "import { spacetimedb, t, ReducerContext } from 'spacetimedb';\n\nspacetimedb.reducer(\n  'delete_message',\n  { messageId: t.string() },\n  (ctx: ReducerContext, { messageId }) => {\n    // Anyone can delete any message!\n    ctx.db.message.id.delete(messageId);\n  }\n);\n\nspacetimedb.reducer(\n  'update_user_profile',\n  { userId: t.identity(), newName: t.string() },\n  (ctx: ReducerContext, { userId, newName }) => {\n    // Anyone can update any user's profile!\n    const user = ctx.db.user.identity.find(userId);\n    ctx.db.user.identity.update({ ...user, name: newName });\n  }\n);\n\nspacetimedb.reducer(\n  'ban_user',\n  { userId: t.identity() },\n  (ctx: ReducerContext, { userId }) => {\n    // Anyone can ban anyone!\n    const user = ctx.db.user.identity.find(userId);\n    ctx.db.user.identity.update({ ...user, isBanned: true });\n  }\n);",
     "language": "typescript",
-    "description": "change cssText - single reflow"
+    "description": "no authorization checks"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Cache Repeated Function Calls",
-    "type": "bad",
-    "code": "function ProjectList({ projects }: { projects: Project[] }) {\n  return (\n    <div>\n      {projects.map(project => {\n        // slugify() called 100+ times for same project names\n        const slug = slugify(project.name)\n        \n        return <ProjectCard key={project.id} slug={slug} />\n      })}\n    </div>\n  )\n}",
+    "ruleTitle": "Authorization Checks",
+    "type": "good",
+    "code": "import { spacetimedb, table, t, ReducerContext } from 'spacetimedb';\n\nconst Admin = table(\n  { name: 'admin', public: true },\n  {\n    identity: t.identity().primaryKey(),\n    role: t.string(), // 'super_admin' | 'moderator'\n  }\n);\n\nfunction generateId(): string {\n  return crypto.randomUUID();\n}\n\nspacetimedb.reducer(\n  'delete_message',\n  { messageId: t.string() },\n  (ctx: ReducerContext, { messageId }) => {\n    const callerId = ctx.sender;\n\n    const message = ctx.db.message.id.find(messageId);\n    if (!message) {\n      throw new Error('Message not found');\n    }\n\n    // Check if caller is the message author OR an admin\n    const isAuthor = message.authorId.toHexString() === callerId.toHexString();\n    const isAdmin = ctx.db.admin.identity.find(callerId) !== undefined;\n\n    if (!isAuthor && !isAdmin) {\n      throw new Error('Not authorized to delete this message');\n    }\n\n    ctx.db.message.id.delete(messageId);\n\n    // Log admin actions for audit\n    if (isAdmin && !isAuthor) {\n      ctx.db.audit_log.insert({\n        id: generateId(),\n        adminId: callerId,\n        action: 'delete_message',\n        targetId: messageId,\n        timestamp: ctx.timestamp\n      });\n    }\n  }\n);\n\nspacetimedb.reducer(\n  'update_user_profile',\n  { newName: t.string() },\n  (ctx: ReducerContext, { newName }) => {\n    // Users can only update their OWN profile\n    const userId = ctx.sender;\n\n    const user = ctx.db.user.identity.find(userId);\n    if (!user) {\n      throw new Error('User not found');\n    }\n\n    if (!newName || newName.trim().length === 0) {\n      throw new Error('Name cannot be empty');\n    }\n\n    ctx.db.user.identity.update({\n      ...user,\n      name: newName.trim(),\n      updatedAt: ctx.timestamp\n    });\n  }\n);\n\nspacetimedb.reducer(\n  'ban_user',\n  { userId: t.identity(), reason: t.string() },\n  (ctx: ReducerContext, { userId, reason }) => {\n    const adminId = ctx.sender;\n\n    // Verify caller is an admin\n    const admin = ctx.db.admin.identity.find(adminId);\n    if (!admin) {\n      throw new Error('Only admins can ban users');\n    }\n\n    // Verify target exists\n    const targetUser = ctx.db.user.identity.find(userId);\n    if (!targetUser) {\n      throw new Error('User not found');\n    }\n\n    // Prevent banning other admins (unless super_admin)\n    const targetAdmin = ctx.db.admin.identity.find(userId);\n    if (targetAdmin && admin.role !== 'super_admin') {\n      throw new Error('Only super admins can ban other admins');\n    }\n\n    // Prevent self-ban\n    if (adminId.toHexString() === userId.toHexString()) {\n      throw new Error('Cannot ban yourself');\n    }\n\n    ctx.db.user.identity.update({\n      ...targetUser,\n      isBanned: true,\n      bannedAt: ctx.timestamp,\n      bannedBy: adminId,\n      banReason: reason\n    });\n\n    ctx.db.audit_log.insert({\n      id: generateId(),\n      adminId,\n      action: 'ban_user',\n      targetId: userId.toHexString(),\n      details: reason,\n      timestamp: ctx.timestamp\n    });\n  }\n);",
     "language": "typescript",
-    "description": "redundant computation"
+    "description": "proper authorization"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Cache Repeated Function Calls",
-    "type": "good",
-    "code": "// Module-level cache\nconst slugifyCache = new Map<string, string>()\n\nfunction cachedSlugify(text: string): string {\n  if (slugifyCache.has(text)) {\n    return slugifyCache.get(text)!\n  }\n  const result = slugify(text)\n  slugifyCache.set(text, result)\n  return result\n}\n\nfunction ProjectList({ projects }: { projects: Project[] }) {\n  return (\n    <div>\n      {projects.map(project => {\n        // Computed only once per unique project name\n        const slug = cachedSlugify(project.name)\n        \n        return <ProjectCard key={project.id} slug={slug} />\n      })}\n    </div>\n  )\n}",
+    "ruleTitle": "Input Validation at Reducer Entry",
+    "type": "bad",
+    "code": "import { spacetimedb, t, ReducerContext } from 'spacetimedb';\n\nspacetimedb.reducer(\n  'create_product',\n  { name: t.string(), price: t.u64(), stock: t.u32() },\n  (ctx: ReducerContext, { name, price, stock }) => {\n    // No validation - accepts any input!\n    ctx.db.product.insert({\n      id: generateId(),\n      name,\n      price,\n      stock,\n      createdBy: ctx.sender\n    });\n  }\n);\n\nspacetimedb.reducer(\n  'transfer_funds',\n  { toUserId: t.identity(), amount: t.u64() },\n  (ctx: ReducerContext, { toUserId, amount }) => {\n    const fromUser = ctx.db.user.identity.find(ctx.sender);\n    const toUser = ctx.db.user.identity.find(toUserId);\n\n    // No validation - could transfer negative amounts or overdraw!\n    ctx.db.user.identity.update({ ...fromUser, balance: fromUser.balance - amount });\n    ctx.db.user.identity.update({ ...toUser, balance: toUser.balance + amount });\n  }\n);",
     "language": "typescript",
-    "description": "cached results"
+    "description": "no input validation"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Cache Property Access in Loops",
-    "type": "bad",
-    "code": "for (let i = 0; i < arr.length; i++) {\n  process(obj.config.settings.value)\n}",
+    "ruleTitle": "Input Validation at Reducer Entry",
+    "type": "good",
+    "code": "import { spacetimedb, t, ReducerContext } from 'spacetimedb';\n\nfunction generateId(): string {\n  return crypto.randomUUID();\n}\n\nspacetimedb.reducer(\n  'create_product',\n  { name: t.string(), price: t.u64(), stock: t.u32() },\n  (ctx: ReducerContext, { name, price, stock }) => {\n    // Validate all inputs first\n    if (!name || name.trim().length === 0) {\n      throw new Error('Product name is required');\n    }\n\n    if (name.length > 100) {\n      throw new Error('Product name must be 100 characters or less');\n    }\n\n    if (price <= 0n) {\n      throw new Error('Price must be positive');\n    }\n\n    // Check for duplicate names\n    const existing = [...ctx.db.product.iter()].find(p => p.name === name.trim());\n    if (existing) {\n      throw new Error('Product with this name already exists');\n    }\n\n    // All validation passed - safe to insert\n    ctx.db.product.insert({\n      id: generateId(),\n      name: name.trim(),\n      price,\n      stock,\n      createdBy: ctx.sender,\n      createdAt: ctx.timestamp\n    });\n  }\n);\n\nspacetimedb.reducer(\n  'transfer_funds',\n  { toUserId: t.identity(), amount: t.u64() },\n  (ctx: ReducerContext, { toUserId, amount }) => {\n    // Validate amount\n    if (amount <= 0n) {\n      throw new Error('Amount must be positive');\n    }\n\n    // Validate recipient exists\n    const toUser = ctx.db.user.identity.find(toUserId);\n    if (!toUser) {\n      throw new Error('Recipient not found');\n    }\n\n    // Validate sender exists and has sufficient balance\n    const fromUser = ctx.db.user.identity.find(ctx.sender);\n    if (!fromUser) {\n      throw new Error('Sender not found');\n    }\n\n    // Prevent self-transfer\n    if (ctx.sender.toHexString() === toUserId.toHexString()) {\n      throw new Error('Cannot transfer to yourself');\n    }\n\n    // Check sufficient balance\n    if (fromUser.balance < amount) {\n      throw new Error('Insufficient balance');\n    }\n\n    // All validation passed - safe to transfer\n    ctx.db.user.identity.update({\n      ...fromUser,\n      balance: fromUser.balance - amount\n    });\n\n    ctx.db.user.identity.update({\n      ...toUser,\n      balance: toUser.balance + amount\n    });\n\n    // Log the transaction\n    ctx.db.transaction.insert({\n      id: generateId(),\n      fromUserId: ctx.sender,\n      toUserId,\n      amount,\n      timestamp: ctx.timestamp\n    });\n  }\n);",
     "language": "typescript",
-    "description": "3 lookups × N iterations"
+    "description": "comprehensive input validation"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Cache Property Access in Loops",
-    "type": "good",
-    "code": "const value = obj.config.settings.value\nconst len = arr.length\nfor (let i = 0; i < len; i++) {\n  process(value)\n}",
+    "ruleTitle": "Selective Subscriptions",
+    "type": "bad",
+    "code": "// Client subscribes to ALL data - wasteful!\nimport { DbConnection } from './generated';\n\nconst conn = DbConnection.builder()\n  .withUri('ws://localhost:3000')\n  .withModuleName('game-module')\n  .onConnect((ctx, identity, token) => {\n    // Downloads ALL messages ever sent\n    conn.subscription(['SELECT * FROM message']);\n\n    // Downloads ALL players, not just ones in current game\n    conn.subscription(['SELECT * FROM player']);\n\n    // Downloads entire inventory for ALL users\n    conn.subscription(['SELECT * FROM inventory']);\n  })\n  .build();",
     "language": "typescript",
-    "description": "1 lookup total"
+    "description": "subscribing to entire tables"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Cache Storage API Calls",
-    "type": "bad",
-    "code": "function getTheme() {\n  return localStorage.getItem('theme') ?? 'light'\n}\n// Called 10 times = 10 storage reads",
+    "ruleTitle": "Selective Subscriptions",
+    "type": "good",
+    "code": "// React component with selective subscription\nimport { useEffect, useState } from 'react';\nimport { useTable, where, eq } from 'spacetimedb/react';\nimport { DbConnection, Message } from './generated';\n\nfunction ChatRoom({ channelId, conn }: { channelId: string; conn: DbConnection }) {\n  const [subscription, setSubscription] = useState<any>(null);\n\n  useEffect(() => {\n    // Subscribe when component mounts with specific channel\n    const sub = conn.subscription([\n      'SELECT * FROM message WHERE channelId = ?',\n      channelId\n    ]);\n    setSubscription(sub);\n\n    return () => {\n      // Unsubscribe when component unmounts or channelId changes\n      sub?.unsubscribe();\n    };\n  }, [channelId, conn]);\n\n  // Use React hooks with filtering\n  const { rows: messages } = useTable<DbConnection, Message>(\n    'message',\n    where(eq('channelId', channelId))\n  );\n\n  return (\n    <div>\n      {messages.map(msg => (\n        <MessageComponent key={msg.id} message={msg} />\n      ))}\n    </div>\n  );\n}",
     "language": "typescript",
-    "description": "reads storage on every call"
+    "description": "selective subscriptions with filters"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Cache Storage API Calls",
-    "type": "good",
-    "code": "const storageCache = new Map<string, string | null>()\n\nfunction getLocalStorage(key: string) {\n  if (!storageCache.has(key)) {\n    storageCache.set(key, localStorage.getItem(key))\n  }\n  return storageCache.get(key)\n}\n\nfunction setLocalStorage(key: string, value: string) {\n  localStorage.setItem(key, value)\n  storageCache.set(key, value)  // keep cache in sync\n}",
+    "ruleTitle": "Debounce Rapid Updates",
+    "type": "bad",
+    "code": "import { useTable } from 'spacetimedb/react';\nimport { DbConnection, PlayerCursor } from './generated';\n\nfunction CursorOverlay() {\n  const { rows: cursors } = useTable<DbConnection, PlayerCursor>('player_cursor');\n\n  // Re-renders on EVERY cursor movement - could be 60+ times per second per player!\n  return (\n    <div>\n      {cursors.map(cursor => (\n        <div\n          key={cursor.playerId.toHexString()}\n          style={{\n            position: 'absolute',\n            left: cursor.x,\n            top: cursor.y\n          }}\n        >\n          {cursor.playerName}\n        </div>\n      ))}\n    </div>\n  );\n}\n\n// Sending every mouse move - floods the server\nfunction Canvas({ conn }: { conn: DbConnection }) {\n  const handleMouseMove = (e: React.MouseEvent) => {\n    conn.reducers.updateCursor(e.clientX, e.clientY);\n  };\n\n  return <canvas onMouseMove={handleMouseMove} />;\n}",
     "language": "typescript",
-    "description": "Map cache"
+    "description": "updating on every change"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Combine Multiple Array Iterations",
-    "type": "bad",
-    "code": "const admins = users.filter(u => u.isAdmin)\nconst testers = users.filter(u => u.isTester)\nconst inactive = users.filter(u => !u.isActive)",
+    "ruleTitle": "Debounce Rapid Updates",
+    "type": "good",
+    "code": "import { useMemo, useRef, useEffect, useCallback, useState } from 'react';\nimport { useTable } from 'spacetimedb/react';\nimport { DbConnection, PlayerCursor, TypingIndicator } from './generated';\n\n// Throttle hook for limiting update frequency\nfunction useThrottle<T>(value: T, interval: number): T {\n  const [throttledValue, setThrottledValue] = useState(value);\n  const lastUpdated = useRef(Date.now());\n\n  useEffect(() => {\n    const now = Date.now();\n    if (now - lastUpdated.current >= interval) {\n      lastUpdated.current = now;\n      setThrottledValue(value);\n    } else {\n      const timerId = setTimeout(() => {\n        lastUpdated.current = Date.now();\n        setThrottledValue(value);\n      }, interval - (now - lastUpdated.current));\n\n      return () => clearTimeout(timerId);\n    }\n  }, [value, interval]);\n\n  return throttledValue;\n}\n\n// Throttled cursor overlay - updates at most 30fps\nfunction CursorOverlay() {\n  const { rows: rawCursors } = useTable<DbConnection, PlayerCursor>('player_cursor');\n\n  // Throttle to 30fps for smooth but performant rendering\n  const cursors = useThrottle(rawCursors, 33);\n\n  // Use CSS transforms for GPU acceleration\n  return (\n    <div>\n      {cursors.map(cursor => (\n        <div\n          key={cursor.playerId.toHexString()}\n          style={{\n            position: 'absolute',\n            transform: `translate(${cursor.x}px, ${cursor.y}px)`,\n            willChange: 'transform'\n          }}\n        >\n          {cursor.playerName}\n        </div>\n      ))}\n    </div>\n  );\n}\n\n// Throttled mouse position sending\nfunction Canvas({ conn }: { conn: DbConnection }) {\n  const lastSent = useRef(0);\n  const pendingPosition = useRef<{ x: number; y: number } | null>(null);\n\n  const sendPosition = useCallback(() => {\n    if (pendingPosition.current) {\n      conn.reducers.updateCursor(\n        pendingPosition.current.x,\n        pendingPosition.current.y\n      );\n      pendingPosition.current = null;\n    }\n  }, [conn]);\n\n  const handleMouseMove = useCallback((e: React.MouseEvent) => {\n    pendingPosition.current = { x: e.clientX, y: e.clientY };\n\n    const now = Date.now();\n    if (now - lastSent.current >= 50) { // Max 20 updates per second\n      lastSent.current = now;\n      sendPosition();\n    }\n  }, [sendPosition]);\n\n  // Send final position on mouse stop\n  useEffect(() => {\n    const interval = setInterval(() => {\n      if (pendingPosition.current) {\n        sendPosition();\n      }\n    }, 100);\n\n    return () => clearInterval(interval);\n  }, [sendPosition]);\n\n  return <canvas onMouseMove={handleMouseMove} />;\n}\n\n// Debounced typing indicator\nfunction TypingIndicatorDisplay({ channelId }: { channelId: string }) {\n  const { rows: typingUsers } = useTable<DbConnection, TypingIndicator>('typing_indicator');\n\n  // Filter to current channel and recent activity\n  const activeTyping = typingUsers.filter(\n    u => u.channelId === channelId && Number(u.lastTypedAt) > Date.now() - 3000\n  );\n\n  // Debounce the display to avoid flicker\n  const [debouncedTyping, setDebouncedTyping] = useState(activeTyping);\n\n  useEffect(() => {\n    const timer = setTimeout(() => {\n      setDebouncedTyping(activeTyping);\n    }, 300);\n\n    return () => clearTimeout(timer);\n  }, [activeTyping]);\n\n  if (debouncedTyping.length === 0) return null;\n\n  const names = debouncedTyping.map(u => u.userName).join(', ');\n\n  return (\n    <div className=\"typing-indicator\">\n      {names} {debouncedTyping.length === 1 ? 'is' : 'are'} typing...\n    </div>\n  );\n}\n\n// Debounced input for sending typing indicator\nfunction MessageInput({ channelId, conn }: { channelId: string; conn: DbConnection }) {\n  const [message, setMessage] = useState('');\n  const typingTimeout = useRef<NodeJS.Timeout | null>(null);\n\n  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {\n    setMessage(e.target.value);\n\n    // Debounce typing indicator updates\n    if (typingTimeout.current) {\n      clearTimeout(typingTimeout.current);\n    }\n\n    // Send typing indicator\n    conn.reducers.setTyping(channelId, true);\n\n    // Clear typing after 2 seconds of no input\n    typingTimeout.current = setTimeout(() => {\n      conn.reducers.setTyping(channelId, false);\n    }, 2000);\n  };\n\n  return (\n    <input\n      value={message}\n      onChange={handleChange}\n      placeholder=\"Type a message...\"\n    />\n  );\n}",
     "language": "typescript",
-    "description": "3 iterations"
+    "description": "debounced/throttled updates"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Combine Multiple Array Iterations",
-    "type": "good",
-    "code": "const admins: User[] = []\nconst testers: User[] = []\nconst inactive: User[] = []\n\nfor (const user of users) {\n  if (user.isAdmin) admins.push(user)\n  if (user.isTester) testers.push(user)\n  if (!user.isActive) inactive.push(user)\n}",
+    "ruleTitle": "Index Frequently Queried Columns",
+    "type": "bad",
+    "code": "import { spacetimedb, table, t } from 'spacetimedb';\n\nconst Message = table(\n  { name: 'message', public: true },\n  {\n    id: t.string().primaryKey(),\n\n    // These are frequently queried but not indexed!\n    senderId: t.identity(),\n    recipientId: t.identity(),\n    channelId: t.string(),\n\n    content: t.string(),\n    timestamp: t.u64(),\n  }\n);\n\n// Client subscribes to messages by channel - slow without index!\n// subscription: SELECT * FROM message WHERE channelId = 'general'",
     "language": "typescript",
-    "description": "1 iteration"
+    "description": "missing indexes on frequently queried columns"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Early Return from Functions",
-    "type": "bad",
-    "code": "function validateUsers(users: User[]) {\n  let hasError = false\n  let errorMessage = ''\n  \n  for (const user of users) {\n    if (!user.email) {\n      hasError = true\n      errorMessage = 'Email required'\n    }\n    if (!user.name) {\n      hasError = true\n      errorMessage = 'Name required'\n    }\n    // Continues checking all users even after error found\n  }\n  \n  return hasError ? { valid: false, error: errorMessage } : { valid: true }\n}",
+    "ruleTitle": "Index Frequently Queried Columns",
+    "type": "good",
+    "code": "// Client can now efficiently subscribe to specific data\nimport { DbConnection } from './generated';\n\nconst conn = DbConnection.builder()\n  .withUri('ws://localhost:3000')\n  .withModuleName('my-module')\n  .onConnect((ctx, identity, token) => {\n    // Fast - uses channelId index\n    conn.subscription(['SELECT * FROM message WHERE channelId = ?', channelId]);\n\n    // Fast - uses isOnline index\n    conn.subscription(['SELECT * FROM player WHERE isOnline = true']);\n\n    // Fast - uses score index for leaderboard\n    conn.subscription(['SELECT * FROM player ORDER BY score DESC LIMIT 100']);\n  })\n  .build();",
     "language": "typescript",
-    "description": "processes all items even after finding answer"
+    "description": "indexes on query columns"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Early Return from Functions",
-    "type": "good",
-    "code": "function validateUsers(users: User[]) {\n  for (const user of users) {\n    if (!user.email) {\n      return { valid: false, error: 'Email required' }\n    }\n    if (!user.name) {\n      return { valid: false, error: 'Name required' }\n    }\n  }\n\n  return { valid: true }\n}",
+    "ruleTitle": "Primary Key Strategies",
+    "type": "bad",
+    "code": "import { spacetimedb, table, t } from 'spacetimedb';\n\n// Using mutable data as primary key\nconst Player = table(\n  { name: 'player', public: true },\n  {\n    username: t.string().primaryKey(), // Bad: username might change!\n    score: t.u64(),\n  }\n);\n\n// No primary key at all\nconst Message = table(\n  { name: 'message', public: true },\n  {\n    content: t.string(),\n    senderId: t.string(),\n    timestamp: t.u64(),\n    // Missing .primaryKey() - compilation error\n  }\n);\n\n// Using auto-increment when identity would be better\nconst UserProfile = table(\n  { name: 'user_profile', public: true },\n  {\n    id: t.u64().primaryKey().autoInc(), // Bad: loses relationship to identity\n    displayName: t.string(),\n  }\n);",
     "language": "typescript",
-    "description": "returns immediately on first error"
+    "description": "poor primary key choices"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Hoist RegExp Creation",
-    "type": "bad",
-    "code": "function Highlighter({ text, query }: Props) {\n  const regex = new RegExp(`(${query})`, 'gi')\n  const parts = text.split(regex)\n  return <>{parts.map((part, i) => ...)}</>\n}",
-    "language": "tsx",
-    "description": "new RegExp every render"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Hoist RegExp Creation",
+    "ruleTitle": "Primary Key Strategies",
     "type": "good",
-    "code": "const EMAIL_REGEX = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/\n\nfunction Highlighter({ text, query }: Props) {\n  const regex = useMemo(\n    () => new RegExp(`(${escapeRegex(query)})`, 'gi'),\n    [query]\n  )\n  const parts = text.split(regex)\n  return <>{parts.map((part, i) => ...)}</>\n}",
-    "language": "tsx",
-    "description": "memoize or hoist"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Build Index Maps for Repeated Lookups",
-    "type": "bad",
-    "code": "function processOrders(orders: Order[], users: User[]) {\n  return orders.map(order => ({\n    ...order,\n    user: users.find(u => u.id === order.userId)\n  }))\n}",
+    "code": "// Helper for generating UUIDs\nfunction generateId(): string {\n  return crypto.randomUUID();\n}\n\nspacetimedb.reducer(\n  'send_message',\n  { recipientId: t.identity(), content: t.string() },\n  (ctx: ReducerContext, { recipientId, content }) => {\n    ctx.db.message.insert({\n      id: generateId(),\n      senderId: ctx.sender,\n      recipientId,\n      content,\n      timestamp: ctx.timestamp\n    });\n  }\n);",
     "language": "typescript",
-    "description": "Incorrect (O(n) per lookup) example for Build Index Maps for Repeated Lookups"
+    "description": "appropriate primary key strategies"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Build Index Maps for Repeated Lookups",
-    "type": "good",
-    "code": "function processOrders(orders: Order[], users: User[]) {\n  const userById = new Map(users.map(u => [u.id, u]))\n\n  return orders.map(order => ({\n    ...order,\n    user: userById.get(order.userId)\n  }))\n}",
+    "ruleTitle": "Use Generated Types",
+    "type": "bad",
+    "code": "// Manually defined types - can drift from server schema!\n\ninterface Player {\n  id: string; // Wrong! Server uses identity\n  name: string;\n  score: number;\n  isOnline: boolean;\n  // Missing lastSeen field that server has!\n}\n\ninterface Message {\n  id: string;\n  authorId: string;\n  content: string;\n  timestamp: number; // Wrong! Server uses bigint (u64)\n}\n\nfunction PlayerCard({ player }: { player: Player }) {\n  // Type mismatch - runtime errors waiting to happen\n  return <div>{player.name}: {player.score}</div>;\n}",
     "language": "typescript",
-    "description": "Correct (O(1) per lookup) example for Build Index Maps for Repeated Lookups"
+    "description": "manually defined types"
   },
   {
     "ruleId": "",
-    "ruleTitle": "Early Length Check for Array Comparisons",
-    "type": "bad",
-    "code": "function hasChanges(current: string[], original: string[]) {\n  // Always sorts and joins, even when lengths differ\n  return current.sort().join() !== original.sort().join()\n}",
+    "ruleTitle": "Use Generated Types",
+    "type": "good",
+    "code": "// Generated types example (src/generated/index.ts)\n// DO NOT EDIT - Auto-generated by SpacetimeDB CLI\n\nexport interface Player {\n  identity: Identity;\n  name: string;\n  score: bigint;\n  isOnline: boolean;\n  lastSeen: bigint;\n  createdAt: bigint;\n}\n\nexport interface Message {\n  id: string;\n  channelId: string;\n  authorId: Identity;\n  content: string;\n  timestamp: bigint;\n}\n\nexport interface GameState {\n  id: string;\n  status: string; // 'waiting' | 'active' | 'finished'\n  currentRound: number;\n  startedAt: bigint | null;\n}\n\n// DbConnection provides typed access to tables and reducers\nexport interface DbConnection {\n  db: {\n    player: TableHandle<Player>;\n    message: TableHandle<Message>;\n    gameState: TableHandle<GameState>;\n  };\n  reducers: {\n    sendMessage: (channelId: string, content: string) => Promise<void>;\n    createGame: (name: string, maxPlayers: number) => Promise<void>;\n    joinGame: (gameId: string) => Promise<void>;\n  };\n  subscription: (query: [string, ...any[]]) => Subscription;\n}",
     "language": "typescript",
-    "description": "always runs expensive comparison"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Early Length Check for Array Comparisons",
-    "type": "good",
-    "code": "function hasChanges(current: string[], original: string[]) {\n  // Early return if lengths differ\n  if (current.length !== original.length) {\n    return true\n  }\n  // Only sort/join when lengths match\n  const currentSorted = current.toSorted()\n  const originalSorted = original.toSorted()\n  for (let i = 0; i < currentSorted.length; i++) {\n    if (currentSorted[i] !== originalSorted[i]) {\n      return true\n    }\n  }\n  return false\n}",
-    "language": "typescript",
-    "description": "Correct (O(1) length check first) example for Early Length Check for Array Comparisons"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Use Loop for Min/Max Instead of Sort",
-    "type": "bad",
-    "code": "interface Project {\n  id: string\n  name: string\n  updatedAt: number\n}\n\nfunction getLatestProject(projects: Project[]) {\n  const sorted = [...projects].sort((a, b) => b.updatedAt - a.updatedAt)\n  return sorted[0]\n}",
-    "language": "typescript",
-    "description": "Incorrect (O(n log n) - sort to find latest) example for Use Loop for Min/Max Instead of Sort"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Use Loop for Min/Max Instead of Sort",
-    "type": "bad",
-    "code": "function getOldestAndNewest(projects: Project[]) {\n  const sorted = [...projects].sort((a, b) => a.updatedAt - b.updatedAt)\n  return { oldest: sorted[0], newest: sorted[sorted.length - 1] }\n}",
-    "language": "typescript",
-    "description": "Incorrect (O(n log n) - sort for oldest and newest) example for Use Loop for Min/Max Instead of Sort"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Use Loop for Min/Max Instead of Sort",
-    "type": "good",
-    "code": "function getLatestProject(projects: Project[]) {\n  if (projects.length === 0) return null\n  \n  let latest = projects[0]\n  \n  for (let i = 1; i < projects.length; i++) {\n    if (projects[i].updatedAt > latest.updatedAt) {\n      latest = projects[i]\n    }\n  }\n  \n  return latest\n}\n\nfunction getOldestAndNewest(projects: Project[]) {\n  if (projects.length === 0) return { oldest: null, newest: null }\n  \n  let oldest = projects[0]\n  let newest = projects[0]\n  \n  for (let i = 1; i < projects.length; i++) {\n    if (projects[i].updatedAt < oldest.updatedAt) oldest = projects[i]\n    if (projects[i].updatedAt > newest.updatedAt) newest = projects[i]\n  }\n  \n  return { oldest, newest }\n}",
-    "language": "typescript",
-    "description": "Correct (O(n) - single loop) example for Use Loop for Min/Max Instead of Sort"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Use Set/Map for O(1) Lookups",
-    "type": "bad",
-    "code": "const allowedIds = ['a', 'b', 'c', ...]\nitems.filter(item => allowedIds.includes(item.id))",
-    "language": "typescript",
-    "description": "Incorrect (O(n) per check) example for Use Set/Map for O(1) Lookups"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Use Set/Map for O(1) Lookups",
-    "type": "good",
-    "code": "const allowedIds = new Set(['a', 'b', 'c', ...])\nitems.filter(item => allowedIds.has(item.id))",
-    "language": "typescript",
-    "description": "Correct (O(1) per check) example for Use Set/Map for O(1) Lookups"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Use toSorted() Instead of sort() for Immutability",
-    "type": "bad",
-    "code": "function UserList({ users }: { users: User[] }) {\n  // Mutates the users prop array!\n  const sorted = useMemo(\n    () => users.sort((a, b) => a.name.localeCompare(b.name)),\n    [users]\n  )\n  return <div>{sorted.map(renderUser)}</div>\n}",
-    "language": "typescript",
-    "description": "mutates original array"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Use toSorted() Instead of sort() for Immutability",
-    "type": "good",
-    "code": "function UserList({ users }: { users: User[] }) {\n  // Creates new sorted array, original unchanged\n  const sorted = useMemo(\n    () => users.toSorted((a, b) => a.name.localeCompare(b.name)),\n    [users]\n  )\n  return <div>{sorted.map(renderUser)}</div>\n}",
-    "language": "typescript",
-    "description": "creates new array"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Animate SVG Wrapper Instead of SVG Element",
-    "type": "bad",
-    "code": "function LoadingSpinner() {\n  return (\n    <svg \n      className=\"animate-spin\"\n      width=\"24\" \n      height=\"24\" \n      viewBox=\"0 0 24 24\"\n    >\n      <circle cx=\"12\" cy=\"12\" r=\"10\" stroke=\"currentColor\" />\n    </svg>\n  )\n}",
-    "language": "tsx",
-    "description": "animating SVG directly - no hardware acceleration"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Animate SVG Wrapper Instead of SVG Element",
-    "type": "good",
-    "code": "function LoadingSpinner() {\n  return (\n    <div className=\"animate-spin\">\n      <svg \n        width=\"24\" \n        height=\"24\" \n        viewBox=\"0 0 24 24\"\n      >\n        <circle cx=\"12\" cy=\"12\" r=\"10\" stroke=\"currentColor\" />\n      </svg>\n    </div>\n  )\n}",
-    "language": "tsx",
-    "description": "animating wrapper div - hardware accelerated"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Use Explicit Conditional Rendering",
-    "type": "bad",
-    "code": "function Badge({ count }: { count: number }) {\n  return (\n    <div>\n      {count && <span className=\"badge\">{count}</span>}\n    </div>\n  )\n}\n\n// When count = 0, renders: <div>0</div>\n// When count = 5, renders: <div><span class=\"badge\">5</span></div>",
-    "language": "tsx",
-    "description": "renders \"0\" when count is 0"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Use Explicit Conditional Rendering",
-    "type": "good",
-    "code": "function Badge({ count }: { count: number }) {\n  return (\n    <div>\n      {count > 0 ? <span className=\"badge\">{count}</span> : null}\n    </div>\n  )\n}\n\n// When count = 0, renders: <div></div>\n// When count = 5, renders: <div><span class=\"badge\">5</span></div>",
-    "language": "tsx",
-    "description": "renders nothing when count is 0"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Hoist Static JSX Elements",
-    "type": "bad",
-    "code": "function LoadingSkeleton() {\n  return <div className=\"animate-pulse h-20 bg-gray-200\" />\n}\n\nfunction Container() {\n  return (\n    <div>\n      {loading && <LoadingSkeleton />}\n    </div>\n  )\n}",
-    "language": "tsx",
-    "description": "recreates element every render"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Hoist Static JSX Elements",
-    "type": "good",
-    "code": "const loadingSkeleton = (\n  <div className=\"animate-pulse h-20 bg-gray-200\" />\n)\n\nfunction Container() {\n  return (\n    <div>\n      {loading && loadingSkeleton}\n    </div>\n  )\n}",
-    "language": "tsx",
-    "description": "reuses same element"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Prevent Hydration Mismatch Without Flickering",
-    "type": "bad",
-    "code": "function ThemeWrapper({ children }: { children: ReactNode }) {\n  // localStorage is not available on server - throws error\n  const theme = localStorage.getItem('theme') || 'light'\n  \n  return (\n    <div className={theme}>\n      {children}\n    </div>\n  )\n}",
-    "language": "tsx",
-    "description": "breaks SSR"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Prevent Hydration Mismatch Without Flickering",
-    "type": "bad",
-    "code": "function ThemeWrapper({ children }: { children: ReactNode }) {\n  const [theme, setTheme] = useState('light')\n  \n  useEffect(() => {\n    // Runs after hydration - causes visible flash\n    const stored = localStorage.getItem('theme')\n    if (stored) {\n      setTheme(stored)\n    }\n  }, [])\n  \n  return (\n    <div className={theme}>\n      {children}\n    </div>\n  )\n}",
-    "language": "tsx",
-    "description": "visual flickering"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Prevent Hydration Mismatch Without Flickering",
-    "type": "good",
-    "code": "function ThemeWrapper({ children }: { children: ReactNode }) {\n  return (\n    <>\n      <div id=\"theme-wrapper\">\n        {children}\n      </div>\n      <script\n        dangerouslySetInnerHTML={{\n          __html: `\n            (function() {\n              try {\n                var theme = localStorage.getItem('theme') || 'light';\n                var el = document.getElementById('theme-wrapper');\n                if (el) el.className = theme;\n              } catch (e) {}\n            })();\n          `,\n        }}\n      />\n    </>\n  )\n}",
-    "language": "tsx",
-    "description": "no flicker, no hydration mismatch"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Optimize SVG Precision",
-    "type": "bad",
-    "code": "<path d=\"M 10.293847 20.847362 L 30.938472 40.192837\" />",
-    "language": "svg",
-    "description": "excessive precision"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Optimize SVG Precision",
-    "type": "good",
-    "code": "<path d=\"M 10.3 20.8 L 30.9 40.2\" />",
-    "language": "svg",
-    "description": "1 decimal place"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Defer State Reads to Usage Point",
-    "type": "bad",
-    "code": "function ShareButton({ chatId }: { chatId: string }) {\n  const searchParams = useSearchParams()\n\n  const handleShare = () => {\n    const ref = searchParams.get('ref')\n    shareChat(chatId, { ref })\n  }\n\n  return <button onClick={handleShare}>Share</button>\n}",
-    "language": "tsx",
-    "description": "subscribes to all searchParams changes"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Defer State Reads to Usage Point",
-    "type": "good",
-    "code": "function ShareButton({ chatId }: { chatId: string }) {\n  const handleShare = () => {\n    const params = new URLSearchParams(window.location.search)\n    const ref = params.get('ref')\n    shareChat(chatId, { ref })\n  }\n\n  return <button onClick={handleShare}>Share</button>\n}",
-    "language": "tsx",
-    "description": "reads on demand, no subscription"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Narrow Effect Dependencies",
-    "type": "bad",
-    "code": "useEffect(() => {\n  console.log(user.id)\n}, [user])",
-    "language": "tsx",
-    "description": "re-runs on any user field change"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Narrow Effect Dependencies",
-    "type": "good",
-    "code": "useEffect(() => {\n  console.log(user.id)\n}, [user.id])",
-    "language": "tsx",
-    "description": "re-runs only when id changes"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Subscribe to Derived State",
-    "type": "bad",
-    "code": "function Sidebar() {\n  const width = useWindowWidth()  // updates continuously\n  const isMobile = width < 768\n  return <nav className={isMobile ? 'mobile' : 'desktop'}>\n}",
-    "language": "tsx",
-    "description": "re-renders on every pixel change"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Subscribe to Derived State",
-    "type": "good",
-    "code": "function Sidebar() {\n  const isMobile = useMediaQuery('(max-width: 767px)')\n  return <nav className={isMobile ? 'mobile' : 'desktop'}>\n}",
-    "language": "tsx",
-    "description": "re-renders only when boolean changes"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Use Functional setState Updates",
-    "type": "bad",
-    "code": "function TodoList() {\n  const [items, setItems] = useState(initialItems)\n  \n  // Callback must depend on items, recreated on every items change\n  const addItems = useCallback((newItems: Item[]) => {\n    setItems([...items, ...newItems])\n  }, [items])  // ❌ items dependency causes recreations\n  \n  // Risk of stale closure if dependency is forgotten\n  const removeItem = useCallback((id: string) => {\n    setItems(items.filter(item => item.id !== id))\n  }, [])  // ❌ Missing items dependency - will use stale items!\n  \n  return <ItemsEditor items={items} onAdd={addItems} onRemove={removeItem} />\n}",
-    "language": "tsx",
-    "description": "requires state as dependency"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Use Functional setState Updates",
-    "type": "good",
-    "code": "function TodoList() {\n  const [items, setItems] = useState(initialItems)\n  \n  // Stable callback, never recreated\n  const addItems = useCallback((newItems: Item[]) => {\n    setItems(curr => [...curr, ...newItems])\n  }, [])  // ✅ No dependencies needed\n  \n  // Always uses latest state, no stale closure risk\n  const removeItem = useCallback((id: string) => {\n    setItems(curr => curr.filter(item => item.id !== id))\n  }, [])  // ✅ Safe and stable\n  \n  return <ItemsEditor items={items} onAdd={addItems} onRemove={removeItem} />\n}",
-    "language": "tsx",
-    "description": "stable callbacks, no stale closures"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Use Lazy State Initialization",
-    "type": "bad",
-    "code": "function FilteredList({ items }: { items: Item[] }) {\n  // buildSearchIndex() runs on EVERY render, even after initialization\n  const [searchIndex, setSearchIndex] = useState(buildSearchIndex(items))\n  const [query, setQuery] = useState('')\n  \n  // When query changes, buildSearchIndex runs again unnecessarily\n  return <SearchResults index={searchIndex} query={query} />\n}\n\nfunction UserProfile() {\n  // JSON.parse runs on every render\n  const [settings, setSettings] = useState(\n    JSON.parse(localStorage.getItem('settings') || '{}')\n  )\n  \n  return <SettingsForm settings={settings} onChange={setSettings} />\n}",
-    "language": "tsx",
-    "description": "runs on every render"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Use Lazy State Initialization",
-    "type": "good",
-    "code": "function FilteredList({ items }: { items: Item[] }) {\n  // buildSearchIndex() runs ONLY on initial render\n  const [searchIndex, setSearchIndex] = useState(() => buildSearchIndex(items))\n  const [query, setQuery] = useState('')\n  \n  return <SearchResults index={searchIndex} query={query} />\n}\n\nfunction UserProfile() {\n  // JSON.parse runs only on initial render\n  const [settings, setSettings] = useState(() => {\n    const stored = localStorage.getItem('settings')\n    return stored ? JSON.parse(stored) : {}\n  })\n  \n  return <SettingsForm settings={settings} onChange={setSettings} />\n}",
-    "language": "tsx",
-    "description": "runs only once"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Extract to Memoized Components",
-    "type": "bad",
-    "code": "function Profile({ user, loading }: Props) {\n  const avatar = useMemo(() => {\n    const id = computeAvatarId(user)\n    return <Avatar id={id} />\n  }, [user])\n\n  if (loading) return <Skeleton />\n  return <div>{avatar}</div>\n}",
-    "language": "tsx",
-    "description": "computes avatar even when loading"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Extract to Memoized Components",
-    "type": "good",
-    "code": "const UserAvatar = memo(function UserAvatar({ user }: { user: User }) {\n  const id = useMemo(() => computeAvatarId(user), [user])\n  return <Avatar id={id} />\n})\n\nfunction Profile({ user, loading }: Props) {\n  if (loading) return <Skeleton />\n  return (\n    <div>\n      <UserAvatar user={user} />\n    </div>\n  )\n}",
-    "language": "tsx",
-    "description": "skips computation when loading"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Use Transitions for Non-Urgent Updates",
-    "type": "bad",
-    "code": "function ScrollTracker() {\n  const [scrollY, setScrollY] = useState(0)\n  useEffect(() => {\n    const handler = () => setScrollY(window.scrollY)\n    window.addEventListener('scroll', handler, { passive: true })\n    return () => window.removeEventListener('scroll', handler)\n  }, [])\n}",
-    "language": "tsx",
-    "description": "blocks UI on every scroll"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Use Transitions for Non-Urgent Updates",
-    "type": "good",
-    "code": "import { startTransition } from 'react'\n\nfunction ScrollTracker() {\n  const [scrollY, setScrollY] = useState(0)\n  useEffect(() => {\n    const handler = () => {\n      startTransition(() => setScrollY(window.scrollY))\n    }\n    window.addEventListener('scroll', handler, { passive: true })\n    return () => window.removeEventListener('scroll', handler)\n  }, [])\n}",
-    "language": "tsx",
-    "description": "non-blocking updates"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Use after() for Non-Blocking Operations",
-    "type": "bad",
-    "code": "import { logUserAction } from '@/app/utils'\n\nexport async function POST(request: Request) {\n  // Perform mutation\n  await updateDatabase(request)\n  \n  // Logging blocks the response\n  const userAgent = request.headers.get('user-agent') || 'unknown'\n  await logUserAction({ userAgent })\n  \n  return new Response(JSON.stringify({ status: 'success' }), {\n    status: 200,\n    headers: { 'Content-Type': 'application/json' }\n  })\n}",
-    "language": "tsx",
-    "description": "blocks response"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Use after() for Non-Blocking Operations",
-    "type": "good",
-    "code": "import { after } from 'next/server'\nimport { headers, cookies } from 'next/headers'\nimport { logUserAction } from '@/app/utils'\n\nexport async function POST(request: Request) {\n  // Perform mutation\n  await updateDatabase(request)\n  \n  // Log after response is sent\n  after(async () => {\n    const userAgent = (await headers()).get('user-agent') || 'unknown'\n    const sessionCookie = (await cookies()).get('session-id')?.value || 'anonymous'\n    \n    logUserAction({ sessionCookie, userAgent })\n  })\n  \n  return new Response(JSON.stringify({ status: 'success' }), {\n    status: 200,\n    headers: { 'Content-Type': 'application/json' }\n  })\n}",
-    "language": "tsx",
-    "description": "non-blocking"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Per-Request Deduplication with React.cache()",
-    "type": "bad",
-    "code": "const getUser = cache(async (params: { uid: number }) => {\n  return await db.user.findUnique({ where: { id: params.uid } })\n})\n\n// Each call creates new object, never hits cache\ngetUser({ uid: 1 })\ngetUser({ uid: 1 })  // Cache miss, runs query again",
-    "language": "typescript",
-    "description": "always cache miss"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Per-Request Deduplication with React.cache()",
-    "type": "good",
-    "code": "const params = { uid: 1 }\ngetUser(params)  // Query runs\ngetUser(params)  // Cache hit (same reference)",
-    "language": "typescript",
-    "description": "cache hit"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Parallel Data Fetching with Component Composition",
-    "type": "bad",
-    "code": "export default async function Page() {\n  const header = await fetchHeader()\n  return (\n    <div>\n      <div>{header}</div>\n      <Sidebar />\n    </div>\n  )\n}\n\nasync function Sidebar() {\n  const items = await fetchSidebarItems()\n  return <nav>{items.map(renderItem)}</nav>\n}",
-    "language": "tsx",
-    "description": "Sidebar waits for Page's fetch to complete"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Parallel Data Fetching with Component Composition",
-    "type": "good",
-    "code": "async function Header() {\n  const data = await fetchHeader()\n  return <div>{data}</div>\n}\n\nasync function Sidebar() {\n  const items = await fetchSidebarItems()\n  return <nav>{items.map(renderItem)}</nav>\n}\n\nexport default function Page() {\n  return (\n    <div>\n      <Header />\n      <Sidebar />\n    </div>\n  )\n}",
-    "language": "tsx",
-    "description": "both fetch simultaneously"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Minimize Serialization at RSC Boundaries",
-    "type": "bad",
-    "code": "async function Page() {\n  const user = await fetchUser()  // 50 fields\n  return <Profile user={user} />\n}\n\n'use client'\nfunction Profile({ user }: { user: User }) {\n  return <div>{user.name}</div>  // uses 1 field\n}",
-    "language": "tsx",
-    "description": "serializes all 50 fields"
-  },
-  {
-    "ruleId": "",
-    "ruleTitle": "Minimize Serialization at RSC Boundaries",
-    "type": "good",
-    "code": "async function Page() {\n  const user = await fetchUser()\n  return <Profile name={user.name} />\n}\n\n'use client'\nfunction Profile({ name }: { name: string }) {\n  return <div>{name}</div>\n}",
-    "language": "tsx",
-    "description": "serializes only 1 field"
+    "description": "using generated types"
   }
 ]

@@ -196,14 +196,14 @@ export async function parseRuleFile(filePath: string): Promise<RuleFile> {
   // Pattern: area-description.md where area determines section
   const filename = filePath.split('/').pop() || ''
   const sectionMap: Record<string, number> = {
-    async: 1,
-    bundle: 2,
-    server: 3,
-    client: 4,
-    rerender: 5,
-    rendering: 6,
-    js: 7,
-    advanced: 8,
+    module: 1,
+    table: 2,
+    reducer: 3,
+    subscription: 4,
+    client: 5,
+    react: 6,
+    ts: 7,
+    sync: 8,
   }
 
   // Extract area from filename (first part before first dash)
