@@ -4,7 +4,7 @@ This file provides guidance to AI coding agents (Claude Code, Cursor, Copilot, e
 
 ## Repository Overview
 
-A collection of skills for Claude.ai and Claude Code for working with Vercel deployments. Skills are packaged instructions and scripts that extend Claude's capabilities.
+A collection of skills for Claude.ai and Claude Code for working with SpacetimeDB applications. Skills are packaged instructions and scripts that extend Claude's capabilities for building real-time, multiplayer applications with SpacetimeDB.
 
 ## Creating a New Skill
 
@@ -21,9 +21,9 @@ skills/
 
 ### Naming Conventions
 
-- **Skill directory**: `kebab-case` (e.g., `vercel-deploy`, `log-monitor`)
+- **Skill directory**: `kebab-case` (e.g., `spacetimedb-modules`, `stdb-client`)
 - **SKILL.md**: Always uppercase, always this exact filename
-- **Scripts**: `kebab-case.sh` (e.g., `deploy.sh`, `fetch-logs.sh`)
+- **Scripts**: `kebab-case.sh` (e.g., `publish.sh`, `generate-types.sh`)
 - **Zip file**: Must match directory name exactly: `{skill-name}.zip`
 
 ### SKILL.md Format
@@ -31,7 +31,7 @@ skills/
 ```markdown
 ---
 name: {skill-name}
-description: {One sentence describing when to use this skill. Include trigger phrases like "Deploy my app", "Check logs", etc.}
+description: {One sentence describing when to use this skill. Include trigger phrases like "Create a SpacetimeDB module", "Set up subscriptions", etc.}
 ---
 
 # {Skill Title}

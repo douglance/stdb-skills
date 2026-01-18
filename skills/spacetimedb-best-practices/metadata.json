@@ -1,0 +1,15 @@
+{
+  "version": "2.0.0",
+  "organization": "SpacetimeDB",
+  "date": "January 2026",
+  "abstract": "Comprehensive development guide for SpacetimeDB applications, designed for AI agents and LLMs. Covers TypeScript server modules using the function-builder pattern (spacetimedb.reducer, table, t.*), client SDK with DbConnection.builder(), and React integration with spacetimedb/react hooks (useTable with generics and where clauses). Each rule includes detailed explanations, real-world examples comparing incorrect vs. correct implementations, and specific patterns for building real-time, multiplayer applications.",
+  "package": "spacetimedb",
+  "packageVersion": "1.4.0+",
+  "references": [
+    "https://spacetimedb.com/docs",
+    "https://github.com/clockworklabs/SpacetimeDB",
+    "https://spacetimedb.com/docs/modules/typescript/quickstart/",
+    "https://spacetimedb.com/docs/sdks/typescript/",
+    "https://spacetimedb.com/docs/sdks/typescript/quickstart"
+  ]
+}
